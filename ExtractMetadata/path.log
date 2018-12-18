@@ -1,2 +1,4 @@
-/BIGDATA/nsccgz_pcheng_1/benchmarks/UnifiedMetadata/ExtractMetadata/abc.h5
-/BIGDATA/nsccgz_pcheng_1/benchmarks/UnifiedMetadata/ExtractMetadata/MyHDF5.h5
+/BIGDATA/nsccgz_pcheng_1/benchmarks/UnifiedMetadata/ExtractMetadata/MyFile.h5
+/BIGDATA/nsccgz_pcheng_1/benchmarks/UnifiedMetadata/ExtractMetadata/TestFile.h5
+/BIGDATA/nsccgz_pcheng_1/benchmarks/UnifiedMetadata/ExtractMetadata/H5FILE/a.h5
+/BIGDATA/nsccgz_pcheng_1/benchmarks/UnifiedMetadata/ExtractMetadata/H5FILE/abc/b.h5

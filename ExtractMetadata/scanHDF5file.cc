@@ -16,7 +16,7 @@
 #include "mpi.h"
 
 #define MAX_NAME 1024
-#define H5FILE_NAME    "MyHDF5.h5" /* get a better example file... */
+//#define H5FILE_NAME    "h5file/MyFile.h5" /* get a better example file... */
 
 void do_dtype(hid_t);
 void do_dset(hid_t);
@@ -26,7 +26,26 @@ void do_attr(hid_t);
 void scan_attrs(hid_t);
 void do_plist(hid_t);
 
-int main(void) {
+int main(int argc, char *argv[]) {
+
+    MPI_Init(&argc, &argv);
+    int size;
+    int rank;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == 0)
+      printf("Init MPI with %d threads\n",size);
+
+    //Read path list
+    std::vector<std::string> buf;
+    std::string s;
+    std::ifstream f("path.log");
+    while(f >> s) {
+      //std::cout << "Read from file: " << s << std::endl;
+      buf.push_back(s);
+    }
+    if (rank == 0)
+      printf("Num of string is %d\n", buf.size());
 
     hid_t    file;
     hid_t    grp;
@@ -36,13 +55,16 @@ int main(void) {
     /*
      **  Example: open a file, open the root, scan the whole file.
      **/
-    file = H5Fopen(H5FILE_NAME, H5F_ACC_RDWR, H5P_DEFAULT);
-
-    grp = H5Gopen(file, "/", H5P_DEFAULT);
-    scan_group(grp);
-
-    status = H5Fclose(file);
-
+    for(int i = rank; i < buf.size(); i += size) {
+      const char *tmpfile = buf[i].data();
+      printf("Rank %d processing Path : %s\n", rank, tmpfile);
+      file = H5Fopen(tmpfile, H5F_ACC_RDWR, H5P_DEFAULT);
+      grp = H5Gopen(file, "/", H5P_DEFAULT);
+      scan_group(grp);
+      status = H5Fclose(file);
+    }
+  
+    MPI_Finalize();
     return 0;
 }
 
@@ -149,12 +171,7 @@ void do_dset(hid_t did) {
 	printf("Dataset Name : ");
 	puts(ds_name);
 	printf("\n");
-
-	/*
-         **  process the attributes of the dataset, if any.
-         * */
-	scan_attrs(did);
-  
+ 
 	/*    
          ** Get dataset information: dataspace, data type 
          **/
@@ -163,6 +180,12 @@ void do_dset(hid_t did) {
 	printf(" DATA TYPE:\n");
 	do_dtype(tid);
 
+        /*
+         **  process the attributes of the dataset, if any.
+         **/
+        printf(" DataSet attribute info:\n");
+        scan_attrs(did);
+        printf("\n");
 	/*
          ** Retrieve and analyse the dataset properties
          **/
@@ -290,8 +313,8 @@ void do_attr(hid_t aid) {
 
         /*Display rank and dimension sizes for the array attribute*/
         if(rank > 0) {
-          printf("Rank : %d \n", rank);
-          printf("Dimension sizes : ");
+          printf("  Rank : %d \n", rank);
+          printf("  Dimension sizes : ");
           for (int i=0; i< rank; i++)
             printf("%d ", (int)sdim[i]);
           printf("\n");
@@ -324,6 +347,18 @@ void do_attr(hid_t aid) {
                printf("%f ", float_array[i]);
             printf("\n");
             free(float_array);
+            break;
+          }
+          case H5T_STRING :
+          {
+            printf("  Attribute Type : H5T_STRING");
+            hsize_t sz = H5Aget_storage_size(aid);
+            printf(", String size is %d\n",sz);
+            char* char_array = new char[sz+1];
+            ret = H5Aread(aid, atype, (void *)char_array);
+            printf("  Attribute Values : ");
+            printf("%s\n",char_array);
+            free(char_array);
             break;
           }
           default: 

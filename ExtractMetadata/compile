@@ -1,4 +1,4 @@
 #!/bin/bash
 #mpic++ -std=c++11 writeHDF5file.cc -I/BIGDATA/nsccgz_pcheng_1/install/HDF5-1.8.17/include -I/BIGDATA/nsccgz_pcheng_1/install/mpich/include -L/BIGDATA/nsccgz_pcheng_1/install/HDF5-1.8.17/lib -lhdf5 -o writeHDF5file
 mpic++ -std=c++11 scanHDF5file.cc -I/BIGDATA/nsccgz_pcheng_1/install/HDF5-1.8.17/include -I/BIGDATA/nsccgz_pcheng_1/install/mpich/include -L/BIGDATA/nsccgz_pcheng_1/install/HDF5-1.8.17/lib -lhdf5 -o scanHDF5file
-mpic++ -std=c++11 test.cc -fopenmp -o test
+#mpic++ -std=c++11 test.cc -fopenmp -o test

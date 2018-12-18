@@ -1,6 +1,26 @@
 #!/bin/bash
-if [ $# -lt 1 ];then
-  echo "Usage : ./listHDF5file [target_dir]"
+set -e
+if [ $# -lt 2 ];then
+  echo "Usage : ./listHDF5file [target_dir] [num_of_threads]"
+  exit;
 fi
-echo "List HDF5 file paths into path.log"
-ls -R $1 | grep .h5 | sed "s:^:`pwd`/: " > path.log
+
+ROOT_DIR=`pwd`
+echo "root dir is $ROOT_DIR"
+echo "List HDF5 file paths into $ROOT_DIR/path.log"
+rm -f $ROOT_DIR/path.log
+
+function listh5file(){
+  echo "Entering dir $1"
+  cd $1
+  ls . | grep .h5 | sed "s:^:`pwd`/: " >> $ROOT_DIR/path.log
+  for i in `ls -F | grep /`;do(listh5file $i);done
+  cd ..
+  echo "exit dir $1"
+}
+
+ls $1 | grep .h5 | sed "s:^:`pwd`/: " >> $ROOT_DIR/path.log
+for i in `ls -F | grep /`;do(listh5file $i);done
+
+echo "extract atrribute metadata from HDF5 files"
+mpiexec -n $2 ./scanHDF5file
