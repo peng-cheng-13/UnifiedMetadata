@@ -1,0 +1,6 @@
+#!/bin/bash
+if [ $# -lt 1 ];then
+  echo "Usage : ./listHDF5file [target_dir]"
+fi
+echo "List HDF5 file paths into path.log"
+ls -R $1 | grep .h5 | sed "s:^:`pwd`/: " > path.log
