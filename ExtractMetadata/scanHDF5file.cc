@@ -104,6 +104,7 @@ void scan_group(hid_t gid) {
          **  Get all the members of the groups, one at a time.
          **/
 	err = H5Gget_num_objs(gid, &nobj);
+        //#pragma omp parallel for
 	for (i = 0; i < nobj; i++) {
                 /*
                  **  For each object in the group, get the name and

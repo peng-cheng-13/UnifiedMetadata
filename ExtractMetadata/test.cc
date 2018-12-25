@@ -5,6 +5,8 @@
 #include <iostream>
 #include "fstream"
 #include "mpi.h"
+#include <unistd.h> 
+#include <omp.h> 
 
 int main(int argc, char *argv[]) {
   MPI_Init(&argc, &argv);
@@ -21,6 +23,14 @@ int main(int argc, char *argv[]) {
     #pragma omp parallel
     printf("This is 1\n");
     */
+    omp_set_num_threads(8);
+    int threads = omp_get_num_procs();
+    printf("Num of omp threads is %d\n", threads);
+    #pragma omp parallel for
+    for (int i = 0; i < 5; i++) {
+      printf("round %d\n", i);
+      sleep(3);
+    }
     while(f >> s) {
       std::cout << "Read from file: " << s << std::endl;
       buf.push_back(s);
