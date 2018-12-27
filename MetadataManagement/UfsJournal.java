@@ -12,6 +12,7 @@
 package alluxio.master.journal.ufs;
 
 import static org.iq80.leveldb.impl.Iq80DBFactory.factory;
+import static org.iq80.leveldb.impl.Iq80DBFactory.bytes;
 
 import alluxio.Configuration;
 import alluxio.PropertyKey;
@@ -25,7 +26,14 @@ import alluxio.underfs.UnderFileSystemConfiguration;
 import alluxio.underfs.options.DeleteOptions;
 import alluxio.util.URIUtils;
 import alluxio.util.UnderFileSystemUtils;
+import alluxio.proto.journal.File.AsyncPersistRequestEntry;
+import alluxio.proto.journal.File.CompleteFileEntry;
 import alluxio.proto.journal.File.InodeFileEntry;
+import alluxio.proto.journal.File.InodeLastModificationTimeEntry;
+import alluxio.proto.journal.File.PersistDirectoryEntry;
+//import alluxio.proto.journal.File.ReinitializeFileEntry;
+import alluxio.proto.journal.File.SetAttributeEntry;
+//import alluxio.proto.journal.File.StringPairEntry;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -170,12 +178,11 @@ public class UfsJournal implements Journal {
     writer().write(entry);
     ByteBuffer tmpbuffer = ByteBuffer.allocate(8);
     //JournalEntry tmpentry = entry.toBuilder().build();
-    JournalEntry tmpentry = entry;
-    if (tmpentry.hasInodeFile()) {
-      InodeFileEntry fileentry = tmpentry.getInodeFile();
+    if (entry.hasInodeFile()) {
+      InodeFileEntry fileentry = entry.getInodeFile();
       long fileid = fileentry.getId();
       tmpbuffer.putLong(fileid);
-      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(tmpentry));
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(entry));
       LOG.info("DB Test: put KV pair to EntryDB once with fileid {}", fileid);
       LOG.info("File Name: {}", fileentry.getName());
       LOG.info("BlockIds: {}", fileentry.getBlocksList());
@@ -185,11 +192,87 @@ public class UfsJournal implements Journal {
       LOG.info("{}, {}", fileentry.getParentId(), fileentry.getPinned());
       LOG.info("{}, {},", fileentry.getOwner(), fileentry.getGroup());
       LOG.info("{}, {},", fileentry.getTtl(), fileentry.getMode());
-    } else if (tmpentry.hasInodeDirectory()) {
-      long dirid = tmpentry.getInodeDirectory().getId();
+    } else if (entry.hasInodeDirectory()) {
+      long dirid = entry.getInodeDirectory().getId();
       tmpbuffer.putLong(dirid);
-      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(tmpentry));
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(entry));
       LOG.info("DB Test: put DIR KV pair to EntryDB once with fileid {}", dirid);
+    } else if (entry.hasDeleteFile()) {
+      long fileid = entry.getDeleteFile().getId();
+      LOG.info("DB Test: delete KV pair from EntryDB once with fileid {}", fileid);
+      tmpbuffer.putLong(fileid);
+      mEntryDB.delete(tmpbuffer.array());
+    } else if (entry.hasInodeLastModificationTime()) {
+      InodeLastModificationTimeEntry modTimeEntry = entry.getInodeLastModificationTime();
+      long fileid = modTimeEntry.getId();
+      tmpbuffer.putLong(fileid);
+      byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
+      JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
+      JournalEntry newentry =
+          oldentry.toBuilder().setInodeLastModificationTime(modTimeEntry).build();
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
+      LOG.info("DB Test: Update InodeLastModificationTime to EntryDB");
+    } else if (entry.hasPersistDirectory()) {
+      PersistDirectoryEntry typedEntry = entry.getPersistDirectory();
+      long fileid = typedEntry.getId();
+      tmpbuffer.putLong(fileid);
+      byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
+      JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
+      JournalEntry newentry = oldentry.toBuilder().setPersistDirectory(typedEntry).build();
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
+      LOG.info("DB Test: Update PersistDirectory to EntryDB");
+    } else if (entry.hasCompleteFile()) {
+      CompleteFileEntry compEntry = entry.getCompleteFile();
+      long fileid = compEntry.getId();
+      tmpbuffer.putLong(fileid);
+      byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
+      JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
+      JournalEntry newentry = oldentry.toBuilder().setCompleteFile(compEntry).build();
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
+      LOG.info("DB Test: Update CompleteFile to EntryDB");
+    } else if (entry.hasSetAttribute()) {
+      SetAttributeEntry saEntry = entry.getSetAttribute();
+      long fileid = saEntry.getId();
+      tmpbuffer.putLong(fileid);
+      byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
+      JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
+      JournalEntry newentry = oldentry.toBuilder().setSetAttribute(saEntry).build();
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
+      LOG.info("DB Test: SetAttribute to EntryDB");
+    } else if (entry.hasRename()) {
+      long fileid = entry.getRename().getId();
+      tmpbuffer.putLong(fileid);
+      byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
+      JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
+      JournalEntry newentry = oldentry.toBuilder().setRename(entry.getRename()).build();
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
+      LOG.info("DB Test: Rename Entry to EntryDB");
+    } else if (entry.hasInodeDirectoryIdGenerator()) {
+      long mContainerId = entry.getInodeDirectoryIdGenerator().getContainerId();
+      tmpbuffer.putLong(mContainerId);
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(entry));
+      LOG.info("DB Test: Add DirectoryIdGenerator {}, to EntryDB", mContainerId);
+    } else if (entry.hasReinitializeFile()) {
+      String path = entry.getReinitializeFile().getPath();
+      mEntryDB.put(bytes(path), mSerializer.serialize(entry));
+      LOG.info("DB Test: Add ReinitializeFile info {}, to EntryDB", path);
+    } else if (entry.hasAddMountPoint()) {
+      String mountPath = entry.getAddMountPoint().getAlluxioPath();
+      mEntryDB.put(bytes(mountPath), mSerializer.serialize(entry));
+      LOG.info("DB Test: Add mount point {}, to EntryDB", mountPath);
+    } else if (entry.hasDeleteMountPoint()) {
+      String mountPath = entry.getDeleteMountPoint().getAlluxioPath();
+      mEntryDB.delete(bytes(mountPath));
+      LOG.info("DB Test: Delete mount point {}, to EntryDB", mountPath);
+    } else if (entry.hasAsyncPersistRequest()) {
+      AsyncPersistRequestEntry asyncEntry = entry.getAsyncPersistRequest();
+      long fileid = asyncEntry.getFileId();
+      tmpbuffer.putLong(fileid);
+      byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
+      JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
+      JournalEntry newentry = oldentry.toBuilder().setAsyncPersistRequest(asyncEntry).build();
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
+      LOG.info("DB Test: Add AsyncPersistRequest to EntryDB");
     }
   }
 
