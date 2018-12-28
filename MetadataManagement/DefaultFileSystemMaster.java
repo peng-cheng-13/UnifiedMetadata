@@ -429,39 +429,6 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
       } catch (AccessControlException e) {
         throw new RuntimeException(e);
       }
-    } else if (entry.hasInodeLastModificationTime()) {
-      InodeLastModificationTimeEntry modTimeEntry = entry.getInodeLastModificationTime();
-      try (LockedInodePath inodePath = mInodeTree
-          .lockFullInodePath(modTimeEntry.getId(), InodeTree.LockMode.WRITE)) {
-        inodePath.getInode()
-            .setLastModificationTimeMs(modTimeEntry.getLastModificationTimeMs(), true);
-      } catch (FileDoesNotExistException e) {
-        throw new RuntimeException(e);
-      }
-    } else if (entry.hasPersistDirectory()) {
-      PersistDirectoryEntry typedEntry = entry.getPersistDirectory();
-      try (LockedInodePath inodePath = mInodeTree
-          .lockFullInodePath(typedEntry.getId(), InodeTree.LockMode.WRITE)) {
-        inodePath.getInode().setPersistenceState(PersistenceState.PERSISTED);
-      } catch (FileDoesNotExistException e) {
-        throw new RuntimeException(e);
-      }
-    } else if (entry.hasCompleteFile()) {
-      try {
-        completeFileFromEntry(entry.getCompleteFile());
-      } catch (InvalidPathException | InvalidFileSizeException | FileAlreadyCompletedException e) {
-        throw new RuntimeException(e);
-      }
-    } else if (entry.hasSetAttribute()) {
-      try {
-        setAttributeFromEntry(entry.getSetAttribute());
-      } catch (AccessControlException | FileDoesNotExistException | InvalidPathException e) {
-        throw new RuntimeException(e);
-      }
-    } else if (entry.hasDeleteFile()) {
-      deleteFromEntry(entry.getDeleteFile());
-    } else if (entry.hasRename()) {
-      renameFromEntry(entry.getRename());
     } else if (entry.hasInodeDirectoryIdGenerator()) {
       mDirectoryIdGenerator.initFromJournalEntry(entry.getInodeDirectoryIdGenerator());
     } else if (entry.hasReinitializeFile()) {
@@ -472,9 +439,37 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
       } catch (FileAlreadyExistsException | InvalidPathException e) {
         throw new RuntimeException(e);
       }
-    } else if (entry.hasDeleteMountPoint()) {
-      unmountFromEntry(entry.getDeleteMountPoint());
-    } else if (entry.hasAsyncPersistRequest()) {
+    }
+    if (entry.hasInodeLastModificationTime()) {
+      InodeLastModificationTimeEntry modTimeEntry = entry.getInodeLastModificationTime();
+      try (LockedInodePath inodePath = mInodeTree
+          .lockFullInodePath(modTimeEntry.getId(), InodeTree.LockMode.WRITE)) {
+        inodePath.getInode()
+            .setLastModificationTimeMs(modTimeEntry.getLastModificationTimeMs(), true);
+      } catch (FileDoesNotExistException e) {
+        throw new RuntimeException(e);
+      }
+    }
+    if (entry.hasPersistDirectory()) {
+      PersistDirectoryEntry typedEntry = entry.getPersistDirectory();
+      try (LockedInodePath inodePath = mInodeTree
+          .lockFullInodePath(typedEntry.getId(), InodeTree.LockMode.WRITE)) {
+        inodePath.getInode().setPersistenceState(PersistenceState.PERSISTED);
+      } catch (FileDoesNotExistException e) {
+        throw new RuntimeException(e);
+      }
+    }
+    if (entry.hasCompleteFile()) {
+      try {
+        completeFileFromEntry(entry.getCompleteFile());
+      } catch (InvalidPathException | InvalidFileSizeException | FileAlreadyCompletedException e) {
+        throw new RuntimeException(e);
+      }
+    }
+    if (entry.hasRename()) {
+      renameFromEntry(entry.getRename());
+    }
+    if (entry.hasAsyncPersistRequest()) {
       try {
         long fileId = (entry.getAsyncPersistRequest()).getFileId();
         try (LockedInodePath inodePath = mInodeTree
@@ -488,8 +483,13 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
         // longer be in the memory
         LOG.error(e.getMessage());
       }
-    } else {
-      throw new IOException(ExceptionMessage.UNEXPECTED_JOURNAL_ENTRY.getMessage(entry));
+    }
+    if (entry.hasSetAttribute()) {
+      try {
+        setAttributeFromEntry(entry.getSetAttribute());
+      } catch (AccessControlException | FileDoesNotExistException | InvalidPathException e) {
+        throw new RuntimeException(e);
+      }
     }
   }
 
@@ -1393,6 +1393,7 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
         long currLength = length;
         for (long blockId : inode.getBlockIds()) {
           long blockSize = Math.min(currLength, inode.getBlockSizeBytes());
+          LOG.info("DB Test: completeFileInternal, blockid {}, size {}", blockId, blockSize);
           mBlockMaster.commitBlockInUFS(blockId, blockSize);
           currLength -= blockSize;
         }
@@ -1763,12 +1764,13 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
         Inode delInode = delInodePair.getSecond();
         tempInodePath.setDescendant(delInode, delInodePair.getFirst());
         // Do not journal entries covered recursively for performance
-        if (delInode.getId() == inode.getId() || unsafeInodes.contains(delInode.getParentId())) {
+        mInodeTree.deleteInode(tempInodePath, opTimeMs, deleteOptions, journalContext);
+        /*if (delInode.getId() == inode.getId() || unsafeInodes.contains(delInode.getParentId())) {
           mInodeTree.deleteInode(tempInodePath, opTimeMs, deleteOptions, journalContext);
         } else {
           mInodeTree.deleteInode(tempInodePath, opTimeMs, deleteOptions,
               NoopJournalContext.INSTANCE);
-        }
+        }*/
       }
       if (!failedUris.isEmpty()) {
         throw new FailedPreconditionException(ExceptionMessage.DELETE_FAILED_DIRECTORY_NOT_IN_SYNC

@@ -175,9 +175,10 @@ public class UfsJournal implements Journal {
 
   @Override
   public void write(JournalEntry entry) throws IOException {
-    writer().write(entry);
+    //writer().write(entry);
     ByteBuffer tmpbuffer = ByteBuffer.allocate(8);
     //JournalEntry tmpentry = entry.toBuilder().build();
+    //Write file entry to EntryDB
     if (entry.hasInodeFile()) {
       InodeFileEntry fileentry = entry.getInodeFile();
       long fileid = fileentry.getId();
@@ -196,10 +197,10 @@ public class UfsJournal implements Journal {
       long dirid = entry.getInodeDirectory().getId();
       tmpbuffer.putLong(dirid);
       mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(entry));
-      LOG.info("DB Test: put DIR KV pair to EntryDB once with fileid {}", dirid);
+      LOG.info("DB Test: put DIR KV pair to EntryDB once with directory id: {}", dirid);
     } else if (entry.hasDeleteFile()) {
       long fileid = entry.getDeleteFile().getId();
-      LOG.info("DB Test: delete KV pair from EntryDB once with fileid {}", fileid);
+      LOG.info("DB Test: delete KV pair from EntryDB once with fileid/directoryid: {}", fileid);
       tmpbuffer.putLong(fileid);
       mEntryDB.delete(tmpbuffer.array());
     } else if (entry.hasInodeLastModificationTime()) {
@@ -224,6 +225,11 @@ public class UfsJournal implements Journal {
     } else if (entry.hasCompleteFile()) {
       CompleteFileEntry compEntry = entry.getCompleteFile();
       long fileid = compEntry.getId();
+      LOG.info("DB Test: CompleteFile id: {}, length: {}", fileid, compEntry.getLength());
+      int blockcount = compEntry.getBlockIdsCount();
+      for (int i = 0; i < blockcount; i++) {
+        LOG.info("DB Test: CompleteFile blockid: {}", compEntry.getBlockIds(i));
+      }
       tmpbuffer.putLong(fileid);
       byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
       JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
@@ -236,17 +242,18 @@ public class UfsJournal implements Journal {
       tmpbuffer.putLong(fileid);
       byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
       JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
-      JournalEntry newentry = oldentry.toBuilder().setSetAttribute(saEntry).build();
+      JournalEntry newentry = oldentry.toBuilder().mergeSetAttribute(saEntry).build();
       mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
       LOG.info("DB Test: SetAttribute to EntryDB");
     } else if (entry.hasRename()) {
       long fileid = entry.getRename().getId();
+      //long dstpath = entry.getRename().getDstPath();
       tmpbuffer.putLong(fileid);
       byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
       JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
       JournalEntry newentry = oldentry.toBuilder().setRename(entry.getRename()).build();
       mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
-      LOG.info("DB Test: Rename Entry to EntryDB");
+      LOG.info("DB Test: Rename Entry to EntryDB, fileid {}", fileid);
     } else if (entry.hasInodeDirectoryIdGenerator()) {
       long mContainerId = entry.getInodeDirectoryIdGenerator().getContainerId();
       tmpbuffer.putLong(mContainerId);
@@ -273,6 +280,23 @@ public class UfsJournal implements Journal {
       JournalEntry newentry = oldentry.toBuilder().setAsyncPersistRequest(asyncEntry).build();
       mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
       LOG.info("DB Test: Add AsyncPersistRequest to EntryDB");
+    }
+    //Wrtie Block entry to EntryDB
+    if (entry.hasBlockInfo()) {
+      long bid = entry.getBlockInfo().getBlockId();
+      tmpbuffer.putLong(bid);
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(entry));
+      LOG.info("DB Test: Write Block entry to EntryDB with blockID {}", bid);
+    } else if (entry.hasDeleteBlock()) {
+      long bid = entry.getDeleteBlock().getBlockId();
+      tmpbuffer.putLong(bid);
+      mEntryDB.delete(tmpbuffer.array());
+      LOG.info("DB Test: Delete Block entry from EntryDB with blockID {}", bid);
+    } else if (entry.hasBlockContainerIdGenerator()) {
+      long cid = (entry.getBlockContainerIdGenerator()).getNextContainerId();
+      tmpbuffer.putLong(cid);
+      mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(entry));
+      LOG.info("DB Test: Write BlockContainerIdGenerator to EntryDB with blockID {}", cid);
     }
   }
 
@@ -444,16 +468,13 @@ public class UfsJournal implements Journal {
       long fileid;
       while (dbiterator.hasNext()) {
         tmpentry = dbiterator.next();
-        byte[] tmpkey = tmpentry.getKey();
-        buffer = ByteBuffer.wrap(tmpkey);
-        fileid = buffer.getLong();
-        LOG.info("Read file entry once, fileID: {}", fileid);
         byte[] tmpvalue = tmpentry.getValue();
         //entry = JournalEntry.parseFrom(tmpentry.getValue());
         entry = (JournalEntry) mSerializer.deserialize(tmpvalue);
         if (entry != null) {
           if (entry.hasInodeFile()) {
             InodeFileEntry fileentry = entry.getInodeFile();
+            LOG.info("Read file entry once, fileID: {}", fileentry.getId());
             LOG.info("File Name: {}", fileentry.getName());
             LOG.info("BlockIds: {}", fileentry.getBlocksList());
             LOG.info("Cacheable: {}", fileentry.getCacheable());
@@ -462,6 +483,10 @@ public class UfsJournal implements Journal {
             LOG.info("{}, {}", fileentry.getParentId(), fileentry.getPinned());
             LOG.info("{}, {},", fileentry.getOwner(), fileentry.getGroup());
             LOG.info("{}, {},", fileentry.getTtl(), fileentry.getMode());
+          }
+          if (entry.hasInodeDirectory()) {
+            long dirid = entry.getInodeDirectory().getId();
+            LOG.info("Read directory entry once, dirID: {}", dirid);
           }
           mMaster.processJournalEntry(entry);
         }
