@@ -75,6 +75,7 @@ import alluxio.master.file.options.SetAttributeOptions;
 import alluxio.master.journal.JournalContext;
 import alluxio.master.journal.JournalSystem;
 import alluxio.master.journal.NoopJournalContext;
+import alluxio.master.journal.ufs.JavaSerializer;
 import alluxio.metrics.MetricsSystem;
 import alluxio.proto.journal.File.AddMountPointEntry;
 import alluxio.proto.journal.File.AsyncPersistRequestEntry;
@@ -314,6 +315,9 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
   /** The file length from query result. */
   private HashMap<String, Long> mQueryLength = new HashMap<String, Long>();
 
+  /** Serializer that transforms entry to byte array.*/
+  private JavaSerializer mSerializer;
+
   /**
    * The service that checks for inode files with ttl set. We store it here so that it can be
    * accessed from tests.
@@ -363,6 +367,7 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
       mBlockIndexStore = new KratiDataStore(targetfile, 10240);
       mValueStore = new HashStore(new File(storepath.concat("/ValueStore")), 10240);
       mPathStore = new HashStore(new File(storepath.concat("/PathStore")), 10240);
+      mSerializer = new JavaSerializer<HashMap>();
     } catch (Exception e) {
       LOG.warn("Get KratiDataStore failed.", e);
     }
@@ -490,6 +495,9 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
       } catch (AccessControlException | FileDoesNotExistException | InvalidPathException e) {
         throw new RuntimeException(e);
       }
+    }
+    if (entry.hasUDM()) {
+      LOG.info("BD Test: Entry has UDM");
     }
   }
 
@@ -3297,7 +3305,36 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
     if (options.getMode() != Constants.INVALID_MODE) {
       builder.setPermission(options.getMode());
     }
-    appendJournalEntry(JournalEntry.newBuilder().setSetAttribute(builder).build(), journalContext);
+    //JournalEntry tmpentry = JournalEntry.newBuilder().setSetAttribute(builder).build();
+    if (options.mUDM) {
+      List<String> keylist = options.getUDMKey();
+      List<String> valuelist = options.getUDMValue();
+      int size = keylist.size();
+      HashMap<String, String> currnetUDM = new HashMap<String, String>();
+      Inode<?> inode = inodePath.getInode();
+      if (inode instanceof InodeFile) {
+        currnetUDM = ((InodeFile) inode).getUDM();
+      } else {
+        currnetUDM = ((InodeDirectory) inode).getUDM();
+      }
+      if (!options.mDeleteAttribute) {
+        for (int i = 0; i < size; i++) {
+          currnetUDM.put(keylist.get(i), valuelist.get(i));
+        }
+      } else {
+        for (int i = 0; i < size; i++) {
+          currnetUDM.remove(keylist.get(i));
+        }
+      }
+      alluxio.core.protobuf.com.google.protobuf.ByteString tmpbytes =
+          alluxio.core.protobuf.com.google.protobuf.ByteString.copyFrom(
+              mSerializer.serialize(currnetUDM));
+      builder.setUdm(tmpbytes);
+      LOG.info("DB Test: call setAttribute Entry setUDM {}", currnetUDM);
+      //tmpentry.setUDM(currnetUDM);
+    }
+    JournalEntry tmpentry = JournalEntry.newBuilder().setSetAttribute(builder).build();
+    appendJournalEntry(tmpentry, journalContext);
   }
 
   @Override
@@ -3547,6 +3584,14 @@ public final class DefaultFileSystemMaster extends AbstractMaster implements Fil
     }
     if (entry.hasPermission()) {
       options.setMode((short) entry.getPermission());
+    }
+    LOG.info("DB Test: Entry has UDM: {}", entry.hasUdm());
+    if (entry.hasUdm()) {
+      alluxio.core.protobuf.com.google.protobuf.ByteString tmpbytes = entry.getUdm();
+      HashMap<String, String> currentUDM =
+          (HashMap) mSerializer.deserialize(tmpbytes.toByteArray());
+      options.setUDM(currentUDM);
+      LOG.info("DB Test: Entry has UDM: {}", currentUDM);
     }
     try (LockedInodePath inodePath = mInodeTree
         .lockFullInodePath(entry.getId(), InodeTree.LockMode.WRITE)) {

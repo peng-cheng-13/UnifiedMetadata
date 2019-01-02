@@ -243,6 +243,10 @@ public class UfsJournal implements Journal {
       byte[] oldEntryValue = mEntryDB.get(tmpbuffer.array());
       JournalEntry oldentry = (JournalEntry) mSerializer.deserialize(oldEntryValue);
       JournalEntry newentry = oldentry.toBuilder().mergeSetAttribute(saEntry).build();
+      if (entry.hasUDM()) {
+        newentry.setUDM(entry.getUDM());
+        LOG.info("DB Test: Set UDM to SAEntry: {}", entry.getUDM());
+      }
       mEntryDB.put(tmpbuffer.array(), mSerializer.serialize(newentry));
       LOG.info("DB Test: SetAttribute to EntryDB");
     } else if (entry.hasRename()) {
