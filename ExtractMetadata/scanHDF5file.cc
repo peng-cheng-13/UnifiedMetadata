@@ -14,6 +14,10 @@
 #include<vector>
 #include <sys/time.h>
 #include "mpi.h"
+#include "Alluxio.h"
+#include "Util.h"
+#include "JNIHelper.h"
+using namespace tdms;
 
 #define MAX_NAME 1024
 //#define H5FILE_NAME    "h5file/MyFile.h5" /* get a better example file... */
@@ -23,8 +27,14 @@ void do_dset(hid_t);
 void do_link(hid_t, char *);
 void scan_group(hid_t);
 void do_attr(hid_t);
+void do_attr(hid_t aid, char*, char*);
 void scan_attrs(hid_t);
+void scan_attrs(char *, hid_t);
 void do_plist(hid_t);
+
+jTDMSFileSystem client;
+std::string tdmsPath = "/H5test";
+std::string ufsPath = "/BIGDATA/nsccgz_pcheng_1/benchmarks/UnifiedMetadata/ExtractMetadata";
 
 int main(int argc, char *argv[]) {
 
@@ -36,6 +46,11 @@ int main(int argc, char *argv[]) {
     if (rank == 0)
       printf("Init MPI with %d threads\n",size);
 
+    //Init TDMS env
+    TDMSClientContext acc;
+    TDMSFileSystem stackFS(acc);
+    client = &stackFS;
+    TDMSCreateFileOptions* options = TDMSCreateFileOptions::getCreateFileOptions();
     //Read path list
     std::vector<std::string> buf;
     std::string s;
@@ -55,12 +70,23 @@ int main(int argc, char *argv[]) {
     /*
      **  Example: open a file, open the root, scan the whole file.
      **/
+    std::string filepath;
     for(int i = rank; i < buf.size(); i += size) {
       const char *tmpfile = buf[i].data();
       printf("Rank %d processing Path : %s\n", rank, tmpfile);
       file = H5Fopen(tmpfile, H5F_ACC_RDWR, H5P_DEFAULT);
       grp = H5Gopen(file, "/", H5P_DEFAULT);
       scan_group(grp);
+      printf("Size of ufs path is %d\n", ufsPath.length());
+      if (buf[i].find(ufsPath) < buf[i].length()) {
+        filepath = buf[i].replace(0, ufsPath.length(), tdmsPath);
+      } else {
+        filepath = buf[i];
+      }
+      jFileOutStream fileOutStream = client->createFile((char*) filepath.data(), options);
+      fileOutStream->close();
+      client->setDatasetInfo((char*) filepath.data());
+      std::cout << "Path of file is " << filepath << std::endl;
       status = H5Fclose(file);
     }
   
@@ -185,7 +211,8 @@ void do_dset(hid_t did) {
          **  process the attributes of the dataset, if any.
          **/
         printf(" DataSet attribute info:\n");
-        scan_attrs(did);
+        //scan_attrs(did);
+        scan_attrs(ds_name, did);
         printf("\n");
 	/*
          ** Retrieve and analyse the dataset properties
@@ -269,23 +296,125 @@ void  do_link(hid_t gid, char *name) {
 	printf("Symlink: %s points to: %s\n", name, target);
 }
 
+
 /*
  **  Run through all the attributes of a dataset or group. 
  **  This is similar to iterating through a group.
  **/
+
+void scan_attrs(char* datasetName, hid_t oid) {
+        int na;
+        hid_t aid;
+        int i;
+        na = H5Aget_num_attrs(oid);
+        char* key[na];
+        char* value[na];
+        //key[1] = "aaa";
+        //printf("key is %s", key[1]);
+        //char key[128];
+        //char value[128];
+        for (i = 0; i < na; i++) {
+                key[i] = (char *)malloc(128 * sizeof(char));
+                value[i] = (char *)malloc(128 * sizeof(char));
+                aid =   H5Aopen_idx(oid, (unsigned int)i );
+                do_attr(aid, key[i], value[i]);
+                //do_attr(aid, &key[0], &value[0]);
+                //do_attr(aid);
+                printf("Attribute key is %s, value is %s\n", key[i], value[i]);
+                H5Aclose(aid);
+        }
+        //client->addDatasetInfo(datasetName,  key, value, na);
+}
+
 void scan_attrs(hid_t oid) {
 	int na;
 	hid_t aid;
-	int i;
-	
+	int i;	
 	na = H5Aget_num_attrs(oid);
-
 	for (i = 0; i < na; i++) {
 		aid =	H5Aopen_idx(oid, (unsigned int)i );
 		do_attr(aid);
 		H5Aclose(aid);
-	}
+        }
 }
+
+/*
+ * Process one attribute.  
+ * This is similar to the information about a dataset.
+ */
+void do_attr(hid_t aid, char* key, char* value) {
+        ssize_t len;
+        hid_t atype;
+        hid_t aspace;
+        char buf[MAX_NAME]; 
+        int   rank;
+        herr_t ret;
+
+        static std::string attributeV;
+        char tmpvalue[8];
+
+        //len = H5Aget_name(aid, MAX_NAME, buf );
+        //printf("  Attribute Name : %s\n",buf);
+        len = H5Aget_name(aid, MAX_NAME, key);
+
+        aspace = H5Aget_space(aid); /* the dimensions of the attribute data */
+        rank = H5Sget_simple_extent_ndims(aspace); /*Determines the dimensionality of a dataspace*/
+        hsize_t sdim[64];
+        ret = H5Sget_simple_extent_dims(aspace, sdim, NULL); /*Retrieves dataspace dimension size and maximaximum size*/
+
+
+
+        atype  = H5Aget_type(aid);
+        size_t npoints = H5Sget_simple_extent_npoints(aspace);
+
+	switch(H5Tget_class(atype)) { /*Class type: https://support.hdfgroup.org/HDF5/doc/RM/RM_H5T.html#Datatype-GetClass*/
+          case H5T_INTEGER :
+          {
+            //printf("  Attribute Type : H5T_INTEGER \n");
+            int* int_array = (int *)malloc(sizeof(int)*(int)npoints);
+            ret = H5Aread(aid, atype, int_array);
+            for(int i = 0; i < (int)npoints; i++) {
+              sprintf(tmpvalue, "%d ", int_array[i]);
+              attributeV.append(tmpvalue);
+            }
+            sprintf(value, "%s", (char*)attributeV.data());
+            printf("%s\n",value);
+            attributeV = "";
+            free(int_array);
+            break;
+          }
+          case H5T_FLOAT :
+          {
+            //printf("  Attribute Type : H5T_FLOAT \n");
+            float* float_array = (float *)malloc(sizeof(float)*(int)npoints);
+            ret = H5Aread(aid, atype, float_array);
+            for(int i = 0; i < (int)npoints; i++)
+               sprintf(value, "%f ", float_array[i]);
+            //printf("\n");
+            free(float_array);
+            break;
+          }
+          case H5T_STRING :
+          {
+
+            hsize_t sz = H5Aget_storage_size(aid);
+
+            char* char_array = new char[sz+1];
+            ret = H5Aread(aid, atype, (void *)char_array);
+            //ret = H5Aread(aid, atype, (void *)value);
+            sprintf(value, "%s", char_array);
+            free(char_array);
+            break;
+          }
+          default:
+          {
+            printf("UNKNOWN TYPE\n");
+          }
+        }         
+        H5Tclose(atype);
+        H5Sclose(aspace);
+}
+
 
 /*
  **  Process one attribute.  
@@ -325,7 +454,7 @@ void do_attr(hid_t aid) {
         size_t npoints = H5Sget_simple_extent_npoints(aspace);
         printf("  Num of elements in the attribute is %d\n", (int) npoints);
         /*List the value of the attribute*/
-        switch(H5Tget_class(atype)) { //Class type: https://support.hdfgroup.org/HDF5/doc/RM/RM_H5T.html#Datatype-GetClass
+        switch(H5Tget_class(atype)) { /*Class type: https://support.hdfgroup.org/HDF5/doc/RM/RM_H5T.html#Datatype-GetClass*/
           case H5T_INTEGER :
           {
             printf("  Attribute Type : H5T_INTEGER \n");
